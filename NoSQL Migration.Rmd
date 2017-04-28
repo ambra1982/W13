@@ -1,0 +1,156 @@
+---
+title: "NOSQL DataBase"
+author: "Ambra"
+date: "25 aprile 2017"
+output: 
+  html_document:
+      toc: True
+      toc_depth: 3
+      toc_float: true
+      theme: cerulean
+      highlight: tango
+      df_print: kable
+      code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Week 13 assignment - NoSQL migration
+
+For this assignment, you should take information from a relational database and migrate it to a NoSQL database of your own choosing. 
+
+For the relational database, you might use the flights database, the tb database, the "data skills" database your team created for Project 3, or another database of your own choosing or creation.
+
+For the NoSQL database, you may use MongoDB (which we introduced in week 7), Neo4j, or another NoSQL database of your choosing.
+
+Your migration process needs to be reproducible.  R code is encouraged, but not required.  You should also briefly describe the advantages and disadvantages of storing the data in a relational database vs. your NoSQL database.
+
+#Loading data from the nycflights13 package to a MySQL db
+
+```{r}
+library(nycflights13)
+library(RNeo4j)
+library(RMySQL)
+library(RSQLite)
+library(tidyverse)
+
+
+#Exploring the data
+
+data(package="nycflights13")
+
+#The package comes with 5 tables, namely airlines, airports, flights, planes and weather
+
+write.csv(airlines, "C:/Users/Patrizia/Desktop/AmbraMSDA/W13/airlines.csv", row.names=F)
+write.csv(airports, "C:/Users/Patrizia/Desktop/AmbraMSDA/W13/airports.csv", row.names=F)
+write.csv(flights, "C:/Users/Patrizia/Desktop/AmbraMSDA/W13/flights.csv", row.names=F)
+write.csv(planes, "C:/Users/Patrizia/Desktop/AmbraMSDA/W13/planes.csv", row.names=F)
+write.csv(weather, "C:/Users/Patrizia/Desktop/AmbraMSDA/W13/weather.csv", row.names=F)
+
+#Create an empty database
+db <- dbConnect(SQLite(), dbname="airportsdb")
+
+#Populate the db with tables
+if(!dbExistsTable(db,"airlines")) {
+dbWriteTable(conn=db, name="airlines", value="C:/Users/Patrizia/Desktop/AmbraMSDA/W13/airlines.csv", row.names=FALSE, header=TRUE)}
+
+if(!dbExistsTable(db,"airports")) {
+dbWriteTable(conn=db, name="airports", value="C:/Users/Patrizia/Desktop/AmbraMSDA/W13/airports.csv", row.names=FALSE, header=TRUE)}
+
+if(!dbExistsTable(db,"flights")) {
+dbWriteTable(conn=db, name="flights", value="C:/Users/Patrizia/Desktop/AmbraMSDA/W13/flights.csv", row.names=FALSE, header=TRUE)}
+
+if(!dbExistsTable(db,"planes")) {
+dbWriteTable(conn=db, name="planes", value="C:/Users/Patrizia/Desktop/AmbraMSDA/W13/planes.csv", row.names=FALSE, header=TRUE)}
+
+if(!dbExistsTable(db,"weather")) {
+dbWriteTable(conn=db, name="weather", value="C:/Users/Patrizia/Desktop/AmbraMSDA/W13/weather.csv", row.names=FALSE, header=TRUE)}
+
+
+dbListTables(db)
+
+# Test by fetching all query results from airlines into a data frame or reading the airports table:
+airlinesdf<- dbGetQuery(db, "SELECT * FROM airlines")
+
+dbReadTable(db,name="airports" ) %>% head()
+
+dbDisconnect(db)
+
+
+
+```
+
+#Migrating to a GraphDB (Neo4J)
+Importing flights and airports as nodes, arrivals and departures as relationships, after manually copying the files into the import folder of Neo4J
+
+
+```{r}
+graph = startGraph("http://localhost:7474/db/data/", username="neo4j", password="password")
+
+#Delete all existing nodes and edges 
+
+cypher(graph,"match (a) optional match (a)-[r]-() delete a,r")
+
+
+```
+
+#Batch import of airports, flights and airlines csv files through the Neo4J browser
+
+I amended the configuration file to point to the db/data directory to load the csv file locally (see issue with security restriction explained at http://neo4j.com/docs/developer-manual/current/cypher/clauses/load-csv/ ) and it worked in Neo4J, but not in RNeo4J. 
+The same is true for accessing the csv files that I previously uploaded to my W13 Github Repsitory- ex. https://raw.githubusercontent.com/ambra1982/W13/master/airports.csv
+
+The following code worked like a charm in Neo4J browser: 
+![Loading the airports csv file](C:/Users/Patrizia/Desktop/AmbraMSDA/W13/Airports_load.PNG)
+However, the same code returned an error in RNeo4J:
+
+airportsf<- "https://raw.githubusercontent.com/ambra1982/W13/master/airports.csv"
+query= "load csv with headers from {filepath} as airports create (a1:Airport {label: airports.faa, name: airports.name, lat: airports.lat, lon:airports.lon, zone: airports.tzone})"
+cypher(graph, query, filepath=paste0("'",airportsf,"'" ))
+
+Neo4J kept crashing when trying to load all the flights table. Therefore I am going to subset the flights dataset and write the new csv file to the default directory. I am going to select all flights on May 1 (964 observations vs. original 336776). The relevant airports will amount to 84 (vs. 1458 in the original dataset).
+```{r}
+
+str(flights)
+flightsMay<- filter(flights, month == 5)
+flightsMay1<- filter(flightsMay, day == 1)
+
+# I will also subset the airport table to dest and origin found in the flights dataset as amended
+
+airportsMay1 <- airports[airports$faa %in% flightsMay1$dest | airports$faa %in% flightsMay1$origin, ]
+
+str(airportsMay1)
+
+write.csv(flightsMay1, "C:/Users/Patrizia/Documents/Neo4j/db4/data/flights.csv", row.names=F)
+write.csv(airportsMay1, "C:/Users/Patrizia/Documents/Neo4j/db4/data/airports.csv", row.names=F)
+
+
+```
+
+
+Still using the browser, I loaded the flights and airports as amended as nodes and added number and carrier as properties:
+
+![Loading the flights csv file](C:/Users/Patrizia/Desktop/AmbraMSDA/W13/Flights_May1.PNG)
+
+![Loading the airports csv file](C:/Users/Patrizia/Desktop/AmbraMSDA/W13/Airports_May1.PNG)
+
+Then I created the relationships in the browser, using load csv and attaching the labels of "Arrive" and "Depart" :
+
+![Creating the arrivals edges](C:/Users/Patrizia/Desktop/AmbraMSDA/W13/Arrival_edge.PNG)
+
+#Data Visualization 
+Return all flights from JFK to LAX:
+
+ ![JFK to LAX flights](C:/Users/Patrizia/Desktop/AmbraMSDA/W13/JFK_To_LAX.PNG)
+ 
+#Conclusions
+
+Neo4J boasts the clear advantage of making it easy to explore and visualize relationships in datasets. However, compared to MySQL, it took significantly longer to load files from local directories and it did not seem to be able to handle a 32MB file. Additionally, the browser does not seem to resize when returning hundreds of nodes. 
+Finally, there are multiple R packages to work with MySQL databases, while I could only find RNeo4J for graphdb, and I suspect that its manual has not been updated to reflect changes introduced with Neo4J 3.1. 
+
+
+
+```
+
+
